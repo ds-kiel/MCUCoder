@@ -19,11 +19,11 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import LearningRateMonitor
-from mcucoder.model import MCUCoder
+from mcucoder import MCUCoder
 from torchsummary import summary
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-from models import CustomImageDataset
+from mcucoder import CustomImageDataset
 wandb.require("core")
 
 # class CustomImageDataset(Dataset):
@@ -69,13 +69,13 @@ def load_datasets(imagenet_root):
 
     return ImageNet_train, ImageNet_val
 
-def train(model, train_loader, val_loader, wandb_logger, loss):
+def train(model, train_loader, val_loader, wandb_logger, loss, number_of_iterations):
     # lr_monitor = LearningRateMonitor(logging_interval='step')
     # torch.set_float32_matmul_precision('high')
     trainer = L.Trainer(
         accelerator="gpu",
         # max_epochs=40,
-        max_steps=1_000_000,
+        max_steps=number_of_iterations,
         logger=wandb_logger,
         enable_checkpointing=False,
         # precision="bf16-mixed",
@@ -84,10 +84,7 @@ def train(model, train_loader, val_loader, wandb_logger, loss):
     )
     trainer.fit(model, train_loader, val_loader)
     
-    if loss =='mse':
-        torch.save(model.state_dict(), "MCUCoder1M300k196"+"MSE"+".pth")
-    if loss =='msssim':
-        torch.save(model.state_dict(), "MCUCoder1M300k196"+"MSSSIM"+".pth")
+    torch.save(model.state_dict(), "MCUCoder.pth")
 
 def main(args):
     set_seeds()
@@ -101,7 +98,7 @@ def main(args):
     # Training
     train_loader = DataLoader(ImageNet_train, batch_size=args.batch_size, num_workers=1)
     val_loader = DataLoader(ImageNet_val, batch_size=2, num_workers=1)
-    train(model, train_loader, val_loader, wandb_logger, args.loss)
+    train(model, train_loader, val_loader, wandb_logger, args.loss, args.number_of_iterations)
 
     print("Training complete and model saved.")
 
@@ -112,6 +109,8 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_name", type=str, default="MCUCoderRL", help="WandB run name")
     parser.add_argument("--wandb_project", type=str, default="MCUCoderRL", help="WandB project name")
     parser.add_argument("--loss", type=str, default="msssim")
+    parser.add_argument("--number_of_iterations", type=int, default=1_000_000)
+    parser.add_argument("--number_of_channels", type=int, default=196)
 
     args = parser.parse_args()
     main(args)

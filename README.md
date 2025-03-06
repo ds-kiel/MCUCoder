@@ -12,6 +12,43 @@ MCUCoder is an open-source adaptive bitrate video compression model designed spe
 - **Adaptive Bitrate Streaming**: Latent representation sorted by importance allows for dynamic transmission based on available bandwidth.
 - **Comparable Energy Consumption to M-JPEG**: Ensures efficient power usage for real-time streaming applications.
 
+## Installation Instructions
+
+Follow these instructions to set up the required Python environment for running MCUCoder.
+
+1. Clone this Git repository to your local machine using the following command:
+
+   ```bash
+   git clone https://github.com/ds-kiel/MCUCoder
+   cd MCUCoder
+   ```
+2. Create a virtual Python environment
+
+    ```bash
+    virtualenv mcucoder
+    source mcucoder/bin/activate
+    ``` 
+3. Install the necessary Python packages by running:
+
+   ```bash
+   pip install -r req.txt
+   ```
+
+## Train
+
+To train MCUCoder, use the following command:
+```bash
+python train.py --batch_size <YOUR_BATCH_SIZE> --imagenet_root <YOUR_IMAGENET_PATH> --wandb_name <YOUR_WANDB_NAME> --wandb_project <YOUR_WANDB_PROJECT> --loss <YOUR_LOSS_FUNCTION> --number_of_iterations <TRAIN_ITER> --number_of_channels <N>
+   ```
+
+### Example Command
+```bash
+python train.py --batch_size 16 --imagenet_root "/path/to/imagenet" --wandb_name "MCUCoder_Training" --wandb_project "MCUCoder" --loss "msssim" --number_of_iterations 1000000 --number_of_channels 196
+   ```
+
+## Usage Example
+
+## Pretrained models
 
 ## License
 
@@ -29,3 +66,6 @@ year={2024},
 url={https://openreview.net/forum?id=ESjy0fQJJE}
 }
 ```
+
+
+

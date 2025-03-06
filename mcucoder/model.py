@@ -134,11 +134,10 @@ class Encoder(L.LightningModule):
 
 
 class Decoder(L.LightningModule):
-    def __init__(self):
+    def __init__(self,N):
         super(Decoder, self).__init__()
                 
-        # self.N=126
-        self.N=196
+        self.N = N
         self.dec = nn.Sequential(
             AttentionBlock(12),
             deconv(12, self.N, kernel_size=5, stride=2),
@@ -179,11 +178,11 @@ class Decoder(L.LightningModule):
 #Define the Convolutional Autoencoder
 
 class MCUCoder(L.LightningModule):
-    def __init__(self, loss=None):
+    def __init__(self, loss=None, N=196):
         super(MCUCoder, self).__init__()
         #
         self.encoder = Encoder()
-        self.decoder = Decoder()
+        self.decoder = Decoder(N=N)
         self.loss_func = loss
         self.ms_ssim = MultiScaleStructuralSimilarityIndexMeasure(data_range=1.0)
         
