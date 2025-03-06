@@ -46,7 +46,16 @@ python train.py --batch_size <YOUR_BATCH_SIZE> --imagenet_root <YOUR_IMAGENET_PA
 python train.py --batch_size 16 --imagenet_root "/path/to/imagenet" --wandb_name "MCUCoder_Training" --wandb_project "MCUCoder" --loss "msssim" --number_of_iterations 1000000 --number_of_channels 196
    ```
 
-## Usage Example
+## Video Encoding and Decoding with MCUCoder
+
+This script allows you to process videos using MCUCoder for encoding and decoding. It takes an input video, applies the model, and saves the output in the specified directory.
+
+### Usage
+To process a video, use the following command:
+```bash
+python video_enc_dec.py --batch_size <YOUR_BATCH_SIZE> --model_path <YOUR_MODEL_PATH> --video_path <YOUR_VIDEO_PATH> --output_dir <OUTPUT_DIRECTORY>
+```
+
 
 ## Pretrained models
 
