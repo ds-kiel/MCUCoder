@@ -1,8 +1,10 @@
-# MCUCoder: Adaptive Video Compression for IoT Edge Devices (Workshop on Machine Learning and Compression, NeurIPS 2024)
+# [MCUCoder: Adaptive Video Compression for IoT Edge Devices (Workshop on Machine Learning and Compression, NeurIPS 2024)](https://openreview.net/forum?id=ESjy0fQJJE)
 
 ## Overview
 
 MCUCoder is an open-source adaptive bitrate video compression model designed specifically for resource-constrained Internet of Things (IoT) devices. With a lightweight encoder requiring only 10.5K parameters and a memory footprint of 350KB, MCUCoder provides efficient video compression without exceeding the capabilities of low-power microcontrollers (MCUs) and edge devices.
+
+https://openreview.net/forum?id=ESjy0fQJJE
 
 ## Features
 
