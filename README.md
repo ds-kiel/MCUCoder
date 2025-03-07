@@ -1,4 +1,4 @@
-# [MCUCoder: Adaptive Video Compression for IoT Edge Devices (Workshop on Machine Learning and Compression, NeurIPS 2024)](https://openreview.net/forum?id=ESjy0fQJJE)
+# [MCUCoder: Adaptive Video Compression for IoT Devices (Workshop on Machine Learning and Compression, NeurIPS 2024)](https://openreview.net/forum?id=ESjy0fQJJE)
 
 ## Overview
 
