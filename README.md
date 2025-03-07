@@ -7,7 +7,7 @@ MCUCoder is an open-source adaptive bitrate video compression model designed spe
 [Video source](https://github.com/facebookresearch/dinov2) 
 
 ## Demo
-This video showcases the progressive output of MCUCoder. As demonstrated, utilizing more latent channels improves the quality of the decoded video.
+This video showcases the progressive output of MCUCoder. As demonstrated, utilizing more latent channels improves the quality of the decoded video. The numbers show the count of used latent channels for decoding (out of 12 channels).
 
 https://github.com/user-attachments/assets/14ad12c9-9779-4d64-8ee8-f2cffe308006
 
