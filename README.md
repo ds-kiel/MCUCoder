@@ -48,7 +48,6 @@ Follow these instructions to set up the required Python environment for running 
 ## Train
 Use ``` imagenet_prepration.py ``` to extract 400,000 ImageNet images with the highest resolution. To train MCUCoder, use the following command:
 
-To train MCUCoder, use the following command:
 ```bash
 python train.py --batch_size <YOUR_BATCH_SIZE> --imagenet_root <YOUR_IMAGENET_PATH> --wandb_name <YOUR_WANDB_NAME> --wandb_project <YOUR_WANDB_PROJECT> --loss <YOUR_LOSS_FUNCTION> --number_of_iterations <TRAIN_ITER> --number_of_channels <N>
    ```
