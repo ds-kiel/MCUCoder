@@ -46,6 +46,7 @@ Follow these instructions to set up the required Python environment for running 
    ```
 
 ## Train
+Use ``` imagenet_prepration.py ``` to extract 400,000 ImageNet images with the highest resolution. To train MCUCoder, use the following command:
 
 To train MCUCoder, use the following command:
 ```bash
