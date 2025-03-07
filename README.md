@@ -5,9 +5,11 @@
 MCUCoder is an open-source adaptive bitrate video compression model designed specifically for resource-constrained Internet of Things (IoT) devices. With a lightweight encoder requiring only 10.5K parameters and a memory footprint of 350KB, MCUCoder provides efficient video compression without exceeding the capabilities of low-power microcontrollers (MCUs) and edge devices.
 
 
-https://github.com/user-attachments/assets/783b72d3-7032-49f8-ba38-fc0a6fbbf7a5
 
 
+https://github.com/user-attachments/assets/14ad12c9-9779-4d64-8ee8-f2cffe308006
+
+[Video source](https://github.com/facebookresearch/dinov2) 
 
 ## Features
 
