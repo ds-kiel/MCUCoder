@@ -1,0 +1,12 @@
+torch==2.3.1
+torchvision==0.18.1
+opencv-python==4.10.0.84
+lightning==2.3.0
+efficientnet-pytorch==0.7.1
+seaborn==0.13.2
+dahuffman==0.4.1
+wandb==0.17.2
+torchsummary==1.5.1
+compressai
+tensorflow==2.18.0
+compressai==1.2.6
