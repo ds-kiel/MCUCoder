@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 import torch
 import random
@@ -14,16 +14,18 @@ import wandb
 import lightning as L
 import argparse
 import cv2
+from datetime import datetime
 
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import LearningRateMonitor
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from mcucoder import MCUCoder
 from torchsummary import summary
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from mcucoder import CustomImageDataset
+from pathlib import Path
 wandb.require("core")
 
 # class CustomImageDataset(Dataset):
@@ -69,42 +71,63 @@ def load_datasets(imagenet_root):
 
     return ImageNet_train, ImageNet_val
 
-def train(model, train_loader, val_loader, wandb_logger, loss, number_of_iterations):
+def train(model, train_loader, val_loader, wandb_logger, loss, number_of_iterations, run_dir):
     # lr_monitor = LearningRateMonitor(logging_interval='step')
     # torch.set_float32_matmul_precision('high')
+    checkpoint_dir = Path(run_dir) / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_cb = ModelCheckpoint(
+        dirpath=str(checkpoint_dir),
+        filename="epoch{epoch:04d}",
+        save_top_k=-1,
+        every_n_epochs=1,
+        save_last=True,
+    )
     trainer = L.Trainer(
         accelerator="gpu",
         # max_epochs=40,
         max_steps=number_of_iterations,
         logger=wandb_logger,
-        enable_checkpointing=False,
+        enable_checkpointing=True,
+        callbacks=[checkpoint_cb],
         # precision="bf16-mixed",
         # accumulate_grad_batches=8,
         # check_val_every_n_epoch=5
     )
     trainer.fit(model, train_loader, val_loader)
     
-    torch.save(model.state_dict(), "MCUCoder.pth")
+    final_model_path = Path(run_dir) / f"MCUCoder_{loss}.pth"
+    torch.save(model.state_dict(), final_model_path)
+    # Also save a copy in the project root alongside train.py
+    project_root = Path(__file__).resolve().parent
+    root_save_path = project_root / f"MCUCoder_{loss}.pth"
+    torch.save(model.state_dict(), root_save_path)
+    print(f"Saved final model to {final_model_path} and {root_save_path}")
 
 def main(args):
     set_seeds()
     ImageNet_train, ImageNet_val = load_datasets(args.imagenet_root)
 
-    model = MCUCoder(args.loss).to(device='cuda')
+    model = MCUCoder(args.loss, N=args.number_of_channels, total_steps=args.number_of_iterations).to(device='cuda')
 
-    wandb_logger = WandbLogger(name=args.wandb_name, project=args.wandb_project)
+    # isolate each run in its own folder (even if wandb_name repeats)
+    run_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = Path("runs") / f"{args.wandb_name}_{run_suffix}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    wandb_logger = WandbLogger(name=args.wandb_name, project=args.wandb_project, save_dir=str(run_dir))
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     # Training
     train_loader = DataLoader(ImageNet_train, batch_size=args.batch_size, num_workers=1)
     val_loader = DataLoader(ImageNet_val, batch_size=2, num_workers=1)
-    train(model, train_loader, val_loader, wandb_logger, args.loss, args.number_of_iterations)
+    train(model, train_loader, val_loader, wandb_logger, args.loss, args.number_of_iterations, run_dir)
 
     print("Training complete and model saved.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train MCUCoder model")
-    parser.add_argument("--batch_size", type=int,default=16, help="batch_size")
+    parser.add_argument("--batch_size", type=int,default=32, help="batch_size")
     parser.add_argument("--imagenet_root", type=str, default="/data22/datasets/imagenet/val/", help="ImageNet dataset root directory")
     parser.add_argument("--wandb_name", type=str, default="MCUCoderRL", help="WandB run name")
     parser.add_argument("--wandb_project", type=str, default="MCUCoderRL", help="WandB project name")

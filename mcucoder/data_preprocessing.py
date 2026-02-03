@@ -14,14 +14,19 @@ class CustomImageDataset(Dataset):
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.image_files = [f for f in os.listdir(root_dir) if os.path.isfile(os.path.join(root_dir, f))]
+        self.valid_exts = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
+        self.image_files = []
+        for dirpath, _, filenames in os.walk(root_dir):
+            for f in filenames:
+                if f.lower().endswith(self.valid_exts):
+                    self.image_files.append(os.path.join(dirpath, f))
 
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, idx):
-        img_name = os.path.join(self.root_dir, self.image_files[idx])
-        image = Image.open(img_name)
+        img_name = self.image_files[idx]
+        image = Image.open(img_name).convert("RGB")
         if self.transform:
             image = self.transform(image)
         return image

@@ -108,13 +108,45 @@ def ms_ssim_batch(img1, img2, data_range=1.0):
     # Convert MS-SSIM values to dB
     ms_ssim_db_values = [ms_ssim_to_db(value) for value in ms_ssim_values]
     
-    return torch.tensor(ms_ssim_db_values, device='cuda')
+    # Return on CPU to avoid keeping validation buffers on GPU
+    return torch.tensor(ms_ssim_db_values, device='cpu')
 
 def ms_ssim_to_db(ms_ssim):
     return -10 * np.log10(1 - ms_ssim)
-    
-#Define the Convolutional Autoencoder
 
+
+class VGGPerceptualLoss(nn.Module):
+    """VGG16-based perceptual loss using ImageNet weights."""
+
+    def __init__(self):
+        super().__init__()
+        vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_FEATURES).features
+        self.blocks = nn.ModuleList(
+            [
+                vgg[:4].eval(),   # relu1_2
+                vgg[4:9].eval(),  # relu2_2
+                vgg[9:16].eval(), # relu3_3
+                vgg[16:23].eval() # relu4_3
+            ]
+        )
+        for block in self.blocks:
+            for param in block.parameters():
+                param.requires_grad = False
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        input = (input - self.mean) / self.std
+        target = (target - self.mean) / self.std
+        loss = 0.0
+        x, y = input, target
+        for block in self.blocks:
+            x = block(x)
+            y = block(y)
+            loss = loss + F.l1_loss(x, y)
+        return loss
+    
+# NOTE: original encoder kept for reference
 class Encoder(L.LightningModule):
     def __init__(self):
         super(Encoder, self).__init__()
@@ -130,6 +162,37 @@ class Encoder(L.LightningModule):
         x = F.relu(self.conv2(x))
         x = self.conv3(x)
         return x
+
+
+# class Encoder(L.LightningModule):
+#     def __init__(self):
+#         super(Encoder, self).__init__()
+        
+#         # Encoder
+#         self.conv1 = nn.Conv2d(3, 16, 7, stride=2, padding=3)
+#         self.conv2 = nn.Conv2d(16, 16, 5, stride=4, padding=1)
+#         self.conv3 = nn.Conv2d(16, 12, 3, stride=1, padding=1)
+
+#     def forward(self, x, p_selected=None):
+#         x = F.relu(self.conv1(x))
+#         if p_selected is not None:
+#             k = int((1 - p_selected) * x.shape[1])
+#             if k > 0:
+#                 mask = torch.ones_like(x)
+#                 mask[:, -k:, :, :] = 0
+#                 x = x * mask
+
+#         x = F.relu(self.conv2(x))
+
+#         if p_selected is not None:
+#             k = int((1 - p_selected) * x.shape[1])
+#             if k > 0:
+#                 mask = torch.ones_like(x)
+#                 mask[:, -k:, :, :] = 0
+#                 x = x * mask
+
+#         x = self.conv3(x)
+#         return x
 
 
 
@@ -178,16 +241,22 @@ class Decoder(L.LightningModule):
 #Define the Convolutional Autoencoder
 
 class MCUCoder(L.LightningModule):
-    def __init__(self, loss=None, N=196):
+    def __init__(self, loss=None, N=196, total_steps=None, lr=1e-4):
         super(MCUCoder, self).__init__()
         #
         self.encoder = Encoder()
         self.decoder = Decoder(N=N)
         self.loss_func = loss
         self.ms_ssim = MultiScaleStructuralSimilarityIndexMeasure(data_range=1.0)
+        self.vgg_loss = None  # lazily created when needed to avoid GPU memory use
+        self.total_steps = total_steps
+        self.vgg_switch_step = None
+        self.lr = lr
+        self.lambda_rate = 1e-3
         
         self.p = None
         self.replace_value = 0
+        self.last_latent = None
 
         self.training_step_loss = []
         self.validation_step_psnr = []
@@ -202,8 +271,15 @@ class MCUCoder(L.LightningModule):
 
     def forward(self, x):
         # Encoder
+        if self.p:
+            selected_p = self.p
+        else:
+            selected_p = np.random.randint(1, 13)/12
+            # selected_p = np.random.choice([1, 4, 8, 12]) /12
         x = self.encoder(x)
-        x = self.rate_less(x)
+        # x = self.encoder(x, selected_p)
+        x = self.rate_less(x, selected_p)
+        self.last_latent = x
 
         # noise
         if not self.training:
@@ -215,8 +291,12 @@ class MCUCoder(L.LightningModule):
 
         return x
 
+    def set_rate_weight(self, lambda_rate: float):
+        """Optional setter to enable/adjust rate-distortion weighting without changing init signature."""
+        self.lambda_rate = float(lambda_rate)
+
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4, betas=(0.9, 0.999))
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, betas=(0.9, 0.999))
         first_phase = int(self.trainer.max_steps * 0.95)
         # first_phase = 200_000
 
@@ -224,21 +304,59 @@ class MCUCoder(L.LightningModule):
         
         return [optimizer], [{'scheduler': scheduler, 'interval': 'step'}]
 
+    def _get_vgg_loss(self):
+        if self.vgg_loss is None:
+            self.vgg_loss = VGGPerceptualLoss().to(self.device)
+        return self.vgg_loss
+
+
+    def _select_active_loss(self):
+        """Return the loss name to use this step (handles staged vgg training)."""
+        if self.loss_func != 'vgg':
+            return self.loss_func
+
+        if self.vgg_switch_step is None:
+            max_steps = self.total_steps
+            if self.trainer is not None and getattr(self.trainer, "max_steps", None):
+                max_steps = self.trainer.max_steps
+            if max_steps:
+                self.vgg_switch_step = int(max_steps * 0.8)
+
+        if self.vgg_switch_step is None:
+            return 'msssim'
+
+        return 'vgg' if self.global_step >= self.vgg_switch_step else 'msssim'
         
     def training_step(self, train_batch, batch_idx):
         images = train_batch
         
         outputs = self(images)
 
-        if self.loss_func =='msssim':
-            loss = 1 - self.ms_ssim(outputs, images)
-            self.log('during_train_loss_ms_ssim', loss, on_epoch=True, prog_bar=True, logger=True)
+        active_loss = self._select_active_loss()
+        rate_bpp = None
+        if active_loss =='msssim':
+            distortion_loss = 1 - self.ms_ssim(outputs, images)
+            self.log('during_train_loss_ms_ssim', distortion_loss, on_epoch=True, prog_bar=True, logger=True)
         
-        if self.loss_func =='mse':
-            loss = nn.MSELoss()(outputs, images)
-            self.log('during_train_loss_mse', loss, on_epoch=True, prog_bar=True, logger=True)
+        elif active_loss =='mse':
+            distortion_loss = nn.MSELoss()(outputs, images)
+            self.log('during_train_loss_mse', distortion_loss, on_epoch=True, prog_bar=True, logger=True)
+        elif active_loss == 'vgg':
+            vgg_loss = self._get_vgg_loss()
+            distortion_loss = vgg_loss(outputs, images)
+            self.log('during_train_loss_vgg', distortion_loss, on_epoch=True, prog_bar=True, logger=True)
+        else:
+            raise ValueError(f"Unsupported loss type: {self.loss_func}")
 
-        self.training_step_loss.append(loss)
+        if self.lambda_rate > 0.0 and self.last_latent is not None:
+            rate_bpp = self.compute_proxy_bpp(self.last_latent)
+            self.log('train_rate_bpp', rate_bpp, on_epoch=True, prog_bar=True, logger=True)
+            loss = distortion_loss + self.lambda_rate * rate_bpp
+        else:
+            loss = distortion_loss
+
+        # Store detached loss to avoid holding computation graphs across steps
+        self.training_step_loss.append(loss.detach().cpu())
 
         return {
             'loss': loss
@@ -271,7 +389,8 @@ class MCUCoder(L.LightningModule):
             ms_ssim = ms_ssim_batch(outputs, images)
             msssim_temp.append(ms_ssim)
             
-            self.saved_images.append(self.rec_image[0])
+            # Keep validation visualizations on CPU to reduce GPU memory
+            self.saved_images.append(self.rec_image[0].detach().cpu())
 
         
         self.validation_step_psnr.append(psnr_temp)
@@ -309,16 +428,41 @@ class MCUCoder(L.LightningModule):
         self.validation_step_psnr.clear()
         self.validation_step_ms_ssim.clear()
 
-    def rate_less(self,x):
-        temp_x = x.clone()
+    def rate_less(self,x,selected_p=None):
         if self.p:
             # p shows the percentage of keeping
             p = self.p
         else:
-            p = np.random.randint(1, 13)/12
-            
-        if p != 1.0:            
-            p = int(p * x.shape[1])
-            replace_tensor = torch.rand(x.shape[0], x.shape[1]-p, x.shape[2], x.shape[3]).fill_(self.replace_value)
-            temp_x[:,-(x.shape[1]-p):,:,:] =  replace_tensor
-        return temp_x
+            p = selected_p
+            # p = np.random.randint(1, 13)/12
+            # p = np.random.choice([1, 4, 8, 12]) / 12 
+
+        if p != 1.0:
+            p_channels = int(p * x.shape[1])
+            replace_channels = x.shape[1] - p_channels
+            if replace_channels > 0:
+                keep = x[:, :p_channels, :, :]
+                replace_tensor = torch.full(
+                    (x.shape[0], replace_channels, x.shape[2], x.shape[3]),
+                    self.replace_value,
+                    device=x.device,
+                    dtype=x.dtype,
+                )
+                x = torch.cat((keep, replace_tensor), dim=1)
+        return x
+
+    def compute_proxy_bpp(self, latent: Tensor) -> Tensor:
+        """Approximate bpp using a per-channel Gaussian model on quantized latent."""
+        if latent is None:
+            return torch.tensor(0.0, device=self.device)
+
+        noisy_latent = latent + torch.empty_like(latent).uniform_(-0.5, 0.5)
+        flat = noisy_latent.view(noisy_latent.size(0), noisy_latent.size(1), -1)
+        sigma = flat.std(dim=2, unbiased=False).clamp(min=1e-6).unsqueeze(-1)
+
+        nll = 0.5 * (math.log(2 * math.pi) + 2 * torch.log(sigma)) + (flat ** 2) / (2 * (sigma ** 2))
+        total_nll = nll.sum()
+
+        num_pixels = noisy_latent.size(0) * noisy_latent.size(2) * noisy_latent.size(3)
+        bpp = total_nll / (math.log(2.0) * num_pixels)
+        return bpp

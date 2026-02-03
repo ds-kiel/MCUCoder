@@ -1,5 +1,6 @@
 torch==2.3.1
 torchvision==0.18.1
+timm==0.9.16
 opencv-python==4.10.0.84
 lightning==2.3.0
 efficientnet-pytorch==0.7.1

@@ -1,0 +1,13 @@
+
+*.pth
+__pycache__/
+class_eval_samples/
+outputs_batch/
+outputs_tune/
+results/
+results_mjpeg/
+runs/
+*.ckpt
+*.txt
+*.pyc
+mcucoder/__pycache__/

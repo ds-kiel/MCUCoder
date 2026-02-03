@@ -5,7 +5,7 @@
 
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
 import os
 import cv2
@@ -15,8 +15,7 @@ import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
-from mcucoder.model import MCUCoder
-from tqdm import tqdm
+from mcucoder.model import MCUCoder, VGGPerceptualLoss
 from dahuffman import HuffmanCodec
 import torch.nn.functional as F
 from torchmetrics.image import MultiScaleStructuralSimilarityIndexMeasure
@@ -187,11 +186,12 @@ def save_latent_images(latent_tensor, path):
     plt.savefig(path)
     plt.close()
     
-def eval_model(model, used_filter, test_dataset, batch_size, codec, output_dir, output_video_dir):
+def eval_model(model, used_filter, test_dataset, batch_size, codec, output_dir, output_video_dir, vgg_metric=None):
     size_list = []
     psnr_list = []
     ms_ssim_list = []
     all_feature_sizes = []
+    vgg_list = []
     
     test_loader = DataLoader(test_dataset, batch_size=1, num_workers=1)
     
@@ -206,8 +206,9 @@ def eval_model(model, used_filter, test_dataset, batch_size, codec, output_dir, 
         #
         # encoded = encode_TFLite("MCUCoder.tflite", images)
         #
+        # encoded = model.encoder(images, model.p)
         encoded = model.encoder(images)
-        
+
         model.replace_value = 0
         encoded = model.rate_less(encoded)
 
@@ -240,9 +241,14 @@ def eval_model(model, used_filter, test_dataset, batch_size, codec, output_dir, 
         ms_ssim_values = ms_ssim_batch(outputs.detach().cpu(), images.detach().cpu())
         ms_ssim_list.extend(ms_ssim_values)
 
+        if vgg_metric is not None:
+            with torch.no_grad():
+                vgg_value = vgg_metric(outputs, images).item()
+            vgg_list.append(vgg_value)
+
     video_writer.release()
 
-    return size_list, psnr_list, ms_ssim_list
+    return size_list, psnr_list, ms_ssim_list, vgg_list
 
 def create_codec(test_dataset, model):
     codec_setting = {
@@ -250,12 +256,14 @@ def create_codec(test_dataset, model):
         'max': {},
         'codec': {}
     }
+    if len(test_dataset) == 0:
+        raise ValueError("No frames found in test_dataset. Check --video_path and ensure the video loads correctly.")
     temp_loader = DataLoader(test_dataset, batch_size=5000, num_workers=1)
     images, labels = next(iter(temp_loader))
     images = images.to('cuda')
     
 
-    for i in tqdm(range(12)):
+    for i in range(12):
         #
         # encoded = encode_TFLite("MCUCoder.tflite", images)
         #
@@ -283,10 +291,15 @@ def main():
     np.random.seed(0)
     
     model = MCUCoder()
-    state_dict = torch.load(args.model_path, map_location='cuda')
-    model.load_state_dict(state_dict)
+    checkpoint = torch.load(args.model_path, map_location='cuda')
+    # Handle both raw state_dict and Lightning checkpoints with extra metadata
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    # Allow extra keys (e.g., vgg_loss) to be skipped
+    model.load_state_dict(state_dict, strict=False)
     model = model.to('cuda')
     model.eval()
+
+    vgg_metric = VGGPerceptualLoss().to('cuda').eval()
     
     test_dataset, number_of_frames = get_video_frames(args, 224)
     
@@ -306,13 +319,14 @@ def main():
     for used_filter in range(1, 13):
         
         model.p = used_filter / 12
-        frames_sizes, frames_psnrs, frames_ms_ssims = eval_model(model,
-                                                              used_filter=used_filter,                   
-                                                              test_dataset=test_dataset,
-                                                              batch_size=args.batch_size,
-                                                              codec=codec,
-                                                              output_dir=args.output_dir,
-                                                              output_video_dir=output_video_dir)
+        frames_sizes, frames_psnrs, frames_ms_ssims, frames_vggs = eval_model(model,
+                                                                             used_filter=used_filter,                   
+                                                                             test_dataset=test_dataset,
+                                                                             batch_size=args.batch_size,
+                                                                             codec=codec,
+                                                                             output_dir=args.output_dir,
+                                                                             output_video_dir=output_video_dir,
+                                                                             vgg_metric=vgg_metric)
 
         # Convert image size to bits
         frames_sizes = [size * 8 * 1024 for size in frames_sizes]
@@ -321,9 +335,10 @@ def main():
         avg_frames_bpps = np.mean(frames_bpps)
         avg_frames_psnrs = np.mean(frames_psnrs)
         avg_frames_ms_ssims = np.mean(frames_ms_ssims)
+        avg_frames_vggs = np.mean(frames_vggs) if frames_vggs else float("nan")
 
 
-        print(f'used_filter: {used_filter}, bpp: {avg_frames_bpps}, Average PSNR: {avg_frames_psnrs:.2f}dB, Average MS_SSIM: {avg_frames_ms_ssims:.2f}dB')
+        print(f'used_filter: {used_filter}, bpp: {avg_frames_bpps}, Average PSNR: {avg_frames_psnrs:.2f}dB, Average MS_SSIM: {avg_frames_ms_ssims:.2f}dB, Average VGG loss: {avg_frames_vggs:.4f}')
 
         # Plot frame index vs Size
         plt.subplot(2, 1, 1)
